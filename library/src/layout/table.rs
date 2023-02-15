@@ -184,27 +184,51 @@ impl Layout for TableNode {
                 let mut dx = Abs::zero();
                 let segments = strokes.get(Axis::X, start + k);
                 for (i, (&col, &stroke)) in layout.cols.iter().zip(segments).enumerate() {
-                    if let Some(stroke) = stroke {
-                        let mut lpad = strokes.thickness(Axis::Y, i) / 2.0;
-                        let mut rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
-                        if i == 0 {
-                            lpad *= 2.0;
-                        }
-                        if i + 1 == layout.cols.len() {
-                            rpad *= 2.0;
-                        }
-                        let origin = dx + lpad;
-                        let target = dx + col - rpad;
-                        let delta = Point::with_x(target - origin);
-                        let hline = Geometry::Line(delta).stroked(stroke);
-                        let mut y = dy;
-                        if k == 0 {
-                            y += stroke.thickness / 2.0;
-                        } else if k == rows.len() {
-                            y -= stroke.thickness / 2.0;
-                        }
-                        frame.prepend(Point::new(origin, y), Element::Shape(hline));
+                    let Some(stroke) = stroke else {
+                        dx += col;
+                        continue;
+                    };
+
+                    let left = strokes.get(Axis::Y, i);
+                    let mut lpad = if k == 0 {
+                        left[start + k].map_or(Abs::zero(), |s| s.thickness)
+                    } else if k == rows.len() {
+                        left[start + k - 1].map_or(Abs::zero(), |s| s.thickness)
+                    } else {
+                        left[start + k - 1]
+                            .map_or(Abs::zero(), |s| s.thickness)
+                            .max(left[start + k].map_or(Abs::zero(), |s| s.thickness))
+                    };
+
+                    let right = strokes.get(Axis::Y, i + 1);
+                    let mut rpad = if k == 0 {
+                        right[start + k].map_or(Abs::zero(), |s| s.thickness)
+                    } else if k == rows.len() {
+                        right[start + k - 1].map_or(Abs::zero(), |s| s.thickness)
+                    } else {
+                        right[start + k - 1]
+                            .map_or(Abs::zero(), |s| s.thickness)
+                            .max(right[start + k].map_or(Abs::zero(), |s| s.thickness))
+                    };
+
+                    if i > 0 {
+                        lpad /= 2.0;
                     }
+                    if i + 1 < layout.cols.len() {
+                        rpad /= 2.0;
+                    }
+
+                    let origin = dx + lpad;
+                    let target = dx + col - rpad;
+                    let delta = Point::with_x(target - origin);
+                    let hline = Geometry::Line(delta).stroked(stroke);
+                    let mut y = dy;
+                    if k == 0 {
+                        y += stroke.thickness / 2.0;
+                    } else if k == rows.len() {
+                        y -= stroke.thickness / 2.0;
+                    }
+                    frame.prepend(Point::new(origin, y), Element::Shape(hline));
                     dx += col;
                 }
             }
@@ -215,29 +239,28 @@ impl Layout for TableNode {
                 let segments = &strokes.get(Axis::Y, k)[start..start + rows.len()];
                 let mut continuation = None;
                 for (i, (&row, &stroke)) in rows.iter().zip(segments).enumerate() {
-                    if let Some(stroke) = stroke {
-                        let mut origin = dy;
-                        let target = dy + row;
-
-                        if let Some(prev) = continuation.take() {
-                            origin = prev;
-                        }
-
-                        if segments.get(i + 1) == Some(&Some(stroke)) {
-                            continuation = Some(origin);
-                        } else {
-                            let mut x = dx;
-                            if k == 0 {
-                                x += stroke.thickness / 2.0;
-                            } else if k == layout.cols.len() {
-                                x -= stroke.thickness / 2.0;
-                            }
-                            let delta = Point::with_y(target - origin);
-                            let vline = Geometry::Line(delta).stroked(stroke);
-                            frame.prepend(Point::new(x, origin), Element::Shape(vline));
-                        }
-                    }
+                    let mut origin = dy;
+                    let target = dy + row;
                     dy += row;
+
+                    let Some(stroke) = stroke else { continue };
+                    if let Some(prev) = continuation.take() {
+                        origin = prev;
+                    }
+
+                    if segments.get(i + 1) == Some(&Some(stroke)) {
+                        continuation = Some(origin);
+                    } else {
+                        let mut x = dx;
+                        if k == 0 {
+                            x += stroke.thickness / 2.0;
+                        } else if k == layout.cols.len() {
+                            x -= stroke.thickness / 2.0;
+                        }
+                        let delta = Point::with_y(target - origin);
+                        let vline = Geometry::Line(delta).stroked(stroke);
+                        frame.prepend(Point::new(x, origin), Element::Shape(vline));
+                    }
                 }
             }
 
@@ -378,14 +401,15 @@ impl Strokes {
         &self.strokes.get_ref(axis)[k * stride..(k + 1) * stride]
     }
 
-    /// Get the maximum thickness for the k-th separator line on the given axis.
-    fn thickness(&self, axis: Axis, k: usize) -> Abs {
-        self.get(axis, k)
-            .iter()
-            .map(|s| s.map_or(Abs::zero(), |s| s.thickness))
-            .max()
-            .unwrap_or_default()
-    }
+    // / Get the maximum thickness of the two vertical line adjacent to the
+    // / k-th horizontal line track in column `x`.
+    // fn thickness(&self, x: usize, k: usize) -> Abs {
+    //     self.get(Axis::X, k)
+    //         .iter()
+    //         .map(|s| s.map_or(Abs::zero(), |s| s.thickness))
+    //         .max()
+    //         .unwrap_or_default()
+    // }
 }
 
 /// Combine strokes by priority.
