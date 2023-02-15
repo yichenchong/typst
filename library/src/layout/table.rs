@@ -181,18 +181,29 @@ impl Layout for TableNode {
         for (frame, &(start, ref rows)) in layout.fragment.iter_mut().zip(&layout.rows) {
             // Render horizontal lines.
             for (k, dy) in offsets(rows).enumerate() {
-                let k = start + k;
                 let mut dx = Abs::zero();
-                let segments = strokes.get(Axis::X, k);
+                let segments = strokes.get(Axis::X, start + k);
                 for (i, (&col, &stroke)) in layout.cols.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
-                        let lpad = strokes.thickness(Axis::Y, i) / 2.0;
-                        let rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
+                        let mut lpad = strokes.thickness(Axis::Y, i) / 2.0;
+                        let mut rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
+                        if i == 0 {
+                            lpad *= 2.0;
+                        }
+                        if i + 1 == layout.cols.len() {
+                            rpad *= 2.0;
+                        }
                         let origin = dx + lpad;
                         let target = dx + col - rpad;
                         let delta = Point::with_x(target - origin);
                         let hline = Geometry::Line(delta).stroked(stroke);
-                        frame.prepend(Point::new(origin, dy), Element::Shape(hline));
+                        let mut y = dy;
+                        if k == 0 {
+                            y += stroke.thickness / 2.0;
+                        } else if k == rows.len() {
+                            y -= stroke.thickness / 2.0;
+                        }
+                        frame.prepend(Point::new(origin, y), Element::Shape(hline));
                     }
                     dx += col;
                 }
@@ -206,14 +217,7 @@ impl Layout for TableNode {
                 for (i, (&row, &stroke)) in rows.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
                         let mut origin = dy;
-                        if i == 0 || segments[i - 1].is_none() {
-                            origin -= strokes.thickness(Axis::X, start + i) / 2.0;
-                        }
-
-                        let mut target = dy + row;
-                        if i + 1 == rows.len() || segments[i + 1].is_none() {
-                            target += strokes.thickness(Axis::X, start + i + 1) / 2.0;
-                        }
+                        let target = dy + row;
 
                         if let Some(prev) = continuation.take() {
                             origin = prev;
@@ -222,9 +226,15 @@ impl Layout for TableNode {
                         if segments.get(i + 1) == Some(&Some(stroke)) {
                             continuation = Some(origin);
                         } else {
+                            let mut x = dx;
+                            if k == 0 {
+                                x += stroke.thickness / 2.0;
+                            } else if k == layout.cols.len() {
+                                x -= stroke.thickness / 2.0;
+                            }
                             let delta = Point::with_y(target - origin);
                             let vline = Geometry::Line(delta).stroked(stroke);
-                            frame.prepend(Point::new(dx, origin), Element::Shape(vline));
+                            frame.prepend(Point::new(x, origin), Element::Shape(vline));
                         }
                     }
                     dy += row;
