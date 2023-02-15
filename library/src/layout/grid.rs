@@ -187,7 +187,7 @@ pub struct GridLayouter<'a, 'v> {
     /// The sum of `rcols`.
     width: Abs,
     /// Resolve row sizes, by region.
-    rrows: Vec<Vec<RowPiece>>,
+    rrows: Vec<(usize, Vec<Abs>)>,
     /// Rows in the current region.
     lrows: Vec<Row>,
     /// The initial size of the current region before we started subtracting.
@@ -203,17 +203,8 @@ pub struct GridLayout {
     pub fragment: Fragment,
     /// The column widths.
     pub cols: Vec<Abs>,
-    /// The heights of the resulting rows segments, by region.
-    pub rows: Vec<Vec<RowPiece>>,
-}
-
-/// Details about a resulting row piece.
-#[derive(Debug)]
-pub struct RowPiece {
-    /// The height of the segment.
-    pub height: Abs,
-    /// The index of the row.
-    pub y: usize,
+    /// The starting row index and heights of the rows segments, by region.
+    pub rows: Vec<(usize, Vec<Abs>)>,
 }
 
 /// Produced by initial row layout, auto and relative rows are already finished,
@@ -650,6 +641,7 @@ impl<'a, 'v> GridLayouter<'a, 'v> {
         let mut output = Frame::new(size);
         let mut pos = Point::zero();
         let mut rrows = vec![];
+        let mut first = None;
 
         // Place finished rows and layout fractional rows.
         for row in std::mem::take(&mut self.lrows) {
@@ -663,13 +655,14 @@ impl<'a, 'v> GridLayouter<'a, 'v> {
             };
 
             let height = frame.height();
+            first.get_or_insert(y);
             output.push_frame(pos, frame);
-            rrows.push(RowPiece { height, y });
+            rrows.push(height);
             pos.y += height;
         }
 
         self.finished.push(output);
-        self.rrows.push(rrows);
+        self.rrows.push((first.unwrap_or_default(), rrows));
         self.regions.next();
         self.initial = self.regions.size;
 

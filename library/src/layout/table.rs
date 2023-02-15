@@ -1,5 +1,4 @@
 use arrayvec::ArrayVec;
-use typst::util::SliceExt;
 
 use crate::layout::{AlignNode, GridLayouter, Sizing, TrackSizings};
 use crate::prelude::*;
@@ -178,54 +177,64 @@ impl Layout for TableNode {
         // Measure the columns and layout the grid row-by-row.
         let mut layout = layouter.layout()?;
 
-        // Render strokes.
-        for (frame, rows) in layout.fragment.iter_mut().zip(&layout.rows) {
+        // Render strokes and fills.
+        for (frame, &(start, ref rows)) in layout.fragment.iter_mut().zip(&layout.rows) {
             // Render horizontal lines.
-            for (k, dy) in offsets(rows.iter().map(|row| row.height)).enumerate() {
+            for (k, dy) in offsets(rows).enumerate() {
+                let k = start + k;
                 let mut dx = Abs::zero();
-                let mut widths = layout.cols.iter();
-                for (stroke, slice) in strokes.get(Axis::X, k).group_by_key(|&s| s) {
-                    let length = widths.by_ref().take(slice.len()).sum();
+                let segments = strokes.get(Axis::X, k);
+                for (i, (&col, &stroke)) in layout.cols.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
-                        let pos = Point::new(dx, dy);
-                        let target = Point::with_x(length);
+                        let lpad = strokes.thickness(Axis::Y, i) / 2.0;
+                        let rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
+                        let pos = Point::new(dx + lpad, dy);
+                        let target = Point::with_x(col - lpad - rpad);
                         let hline = Geometry::Line(target).stroked(stroke);
                         frame.prepend(pos, Element::Shape(hline));
                     }
-                    dx += length;
+                    dx += col;
                 }
             }
 
             // Render vertical lines.
-            for (k, dx) in offsets(layout.cols.iter().copied()).enumerate() {
+            for (k, dx) in offsets(&layout.cols).enumerate() {
                 let mut dy = Abs::zero();
-                let mut heights = rows.iter().map(|row| row.height);
-                for (stroke, slice) in strokes.get(Axis::Y, k).group_by_key(|&s| s) {
-                    let length = heights.by_ref().take(slice.len()).sum();
+                let segments = &strokes.get(Axis::Y, k)[start..];
+                for (i, (&row, &stroke)) in rows.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
-                        let pos = Point::new(dx, dy);
-                        let target = Point::with_y(length);
+                        let mut pos = Point::new(dx, dy);
+                        let mut target = Point::with_y(row);
+
+                        if i == 0 || segments[i - 1].is_none() {
+                            let pad = strokes.thickness(Axis::X, start + i) / 2.0;
+                            pos.y -= pad;
+                            target.y += pad;
+                        } else if i + 1 == rows.len() || segments[i + 1].is_none() {
+                            let pad = strokes.thickness(Axis::X, start + i + 1) / 2.0;
+                            target.y += pad;
+                        }
+
                         let vline = Geometry::Line(target).stroked(stroke);
                         frame.prepend(pos, Element::Shape(vline));
                     }
-                    dy += length;
+                    dy += row;
                 }
             }
-        }
 
-        // Render fills.
-        for (frame, rows) in layout.fragment.iter_mut().zip(&layout.rows) {
+            // Render fills.
             let mut dx = Abs::zero();
             for (x, &col) in layout.cols.iter().enumerate() {
                 let mut dy = Abs::zero();
-                for row in rows {
-                    if let Some(fill) = fill.resolve(vt, x, row.y)? {
+                for (y, &row) in rows.iter().enumerate() {
+                    let y = start + y;
+                    if let Some(fill) = fill.resolve(vt, x, y)? {
                         let pos = Point::new(dx, dy);
-                        let size = Size::new(col, row.height);
+                        let size = Size::new(col, row);
                         let rect = Geometry::Rect(size).filled(fill);
                         frame.prepend(pos, Element::Shape(rect));
                     }
-                    dy += row.height;
+                    dy += row;
                 }
                 dx += col;
             }
@@ -235,12 +244,12 @@ impl Layout for TableNode {
     }
 }
 
-/// Turn an iterator of extents into an iterator of offsets before, in between,
-/// and after the extents, e.g. [10mm, 5mm] -> [0mm, 10mm, 15mm].
-fn offsets(extents: impl IntoIterator<Item = Abs>) -> impl Iterator<Item = Abs> {
+/// Turn a slice of extents into an iterator of offsets before, in between, and
+/// after the extents, e.g. [10mm, 5mm] -> [0mm, 10mm, 15mm].
+fn offsets(extents: &[Abs]) -> impl Iterator<Item = Abs> + '_ {
     let mut offset = Abs::zero();
     std::iter::once(Abs::zero())
-        .chain(extents.into_iter())
+        .chain(extents.iter().copied())
         .map(move |extent| {
             offset += extent;
             offset
@@ -349,13 +358,22 @@ impl Strokes {
         let stride = self.tracks.get(axis);
         &self.strokes.get_ref(axis)[k * stride..(k + 1) * stride]
     }
+
+    /// Get the maximum thickness for the k-th separator line on the given axis.
+    fn thickness(&self, axis: Axis, k: usize) -> Abs {
+        self.get(axis, k)
+            .iter()
+            .map(|s| s.map_or(Abs::zero(), |s| s.thickness))
+            .max()
+            .unwrap_or_default()
+    }
 }
 
 /// Combine strokes by priority.
 fn mix(
     iter: impl Iterator<Item = (usize, Option<PartialStroke<Abs>>)>,
 ) -> Option<Stroke> {
-    let mut vec: ArrayVec<_, 6> = iter.collect();
+    let mut vec: ArrayVec<_, 4> = iter.collect();
     vec.sort_by_key(|&(p, _)| p);
     vec.into_iter()
         .map(|(_, stroke)| stroke)
@@ -366,20 +384,21 @@ fn mix(
 /// Line configuration for a cell.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub struct Lines<T = Length> {
-    sides: Sides<Option<Option<PartialStroke<T>>>>,
     inside: Option<Option<PartialStroke<T>>>,
     outside: Option<Option<PartialStroke<T>>>,
-    rest: Option<Option<PartialStroke<T>>>,
+    sides: Sides<Option<Option<PartialStroke<T>>>>,
 }
 
 impl<T> Lines<T> {
     /// Equal lines on all sides.
-    fn splat(value: Option<PartialStroke<T>>) -> Self {
+    fn splat(value: Option<PartialStroke<T>>) -> Self
+    where
+        T: Clone,
+    {
         Self {
-            sides: Sides::default(),
             inside: None,
             outside: None,
-            rest: Some(value),
+            sides: Sides::splat(Some(value)),
         }
     }
 }
@@ -391,9 +410,9 @@ impl Lines<Abs> {
         side: Side,
         outside: bool,
     ) -> impl Iterator<Item = (usize, Option<PartialStroke<Abs>>)> {
-        let first = self.sides.get(side);
-        let second = if outside { self.outside } else { self.inside };
-        [first, second, self.rest]
+        let first = if outside { self.outside } else { self.inside };
+        let second = self.sides.get(side);
+        [first, second]
             .into_iter()
             .enumerate()
             .filter_map(|(p, s)| s.map(|s| (p, s)))
@@ -408,7 +427,6 @@ impl Resolve for Lines {
             sides: self.sides.resolve(styles),
             inside: self.inside.resolve(styles),
             outside: self.outside.resolve(styles),
-            rest: self.rest.resolve(styles),
         }
     }
 }
@@ -418,22 +436,23 @@ castable! {
     stroke: Option<PartialStroke> => Self::splat(stroke),
     mut dict: Dict => {
         let mut take = |key| dict.take(key).ok().map(Value::cast).transpose();
-        let x = take("x")?;
-        let y = take("y")?;
+
+        let rest = take("rest")?;
+        let x = take("x")?.or(rest);
+        let y = take("y")?.or(rest);
         let lines = Self {
             sides: Sides {
-                left: take("left")?.or(x),
-                top: take("top")?.or(y),
-                right: take("right")?.or(x),
-                bottom: take("bottom")?.or(y),
+                left: take("left")?.or(y),
+                top: take("top")?.or(x),
+                right: take("right")?.or(y),
+                bottom: take("bottom")?.or(x),
             },
             inside: take("inside")?,
             outside: take("outside")?,
-            rest: take("rest")?,
         };
         dict.finish(&[
-            "x", "y", "left", "top", "right", "bottom",
-            "inside", "outside",  "rest",
+            "left", "top", "right", "bottom",
+            "inside", "outside", "x", "y", "rest",
         ])?;
         lines
     },
