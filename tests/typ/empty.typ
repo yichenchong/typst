@@ -2,6 +2,6 @@
   align: center,
   fill: aqua.lighten(50%),
   columns: (1fr,) * 3,
-  stroke: (x: 1pt, outside: 3pt),
+  stroke: (y: 4pt, outside: 4pt),
   ..([Hello],) * 10,
 )

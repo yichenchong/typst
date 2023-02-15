@@ -189,8 +189,9 @@ impl Layout for TableNode {
                         let lpad = strokes.thickness(Axis::Y, i) / 2.0;
                         let rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
                         let pos = Point::new(dx + lpad, dy);
-                        let target = Point::with_x(col - lpad - rpad);
-                        let hline = Geometry::Line(target).stroked(stroke);
+                        let target = dx + col - rpad;
+                        let delta = Point::with_x(target - pos.x);
+                        let hline = Geometry::Line(delta).stroked(stroke);
                         frame.prepend(pos, Element::Shape(hline));
                     }
                     dx += col;
@@ -200,23 +201,29 @@ impl Layout for TableNode {
             // Render vertical lines.
             for (k, dx) in offsets(&layout.cols).enumerate() {
                 let mut dy = Abs::zero();
-                let segments = &strokes.get(Axis::Y, k)[start..];
+                let segments = &strokes.get(Axis::Y, k)[start..start + rows.len()];
+                let mut continuation = None;
                 for (i, (&row, &stroke)) in rows.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
                         let mut pos = Point::new(dx, dy);
-                        let mut target = Point::with_y(row);
-
+                        let mut target = dy + row;
                         if i == 0 || segments[i - 1].is_none() {
-                            let pad = strokes.thickness(Axis::X, start + i) / 2.0;
-                            pos.y -= pad;
-                            target.y += pad;
+                            pos.y -= strokes.thickness(Axis::X, start + i) / 2.0;
                         } else if i + 1 == rows.len() || segments[i + 1].is_none() {
-                            let pad = strokes.thickness(Axis::X, start + i + 1) / 2.0;
-                            target.y += pad;
+                            target += strokes.thickness(Axis::X, start + i + 1) / 2.0;
                         }
 
-                        let vline = Geometry::Line(target).stroked(stroke);
-                        frame.prepend(pos, Element::Shape(vline));
+                        if let Some(prev) = continuation.take() {
+                            pos.y = prev;
+                        }
+
+                        if segments.get(i + 1) == Some(&Some(stroke)) {
+                            continuation = Some(pos.y);
+                        } else {
+                            let delta = Point::with_y(target - pos.y);
+                            let vline = Geometry::Line(delta).stroked(stroke);
+                            frame.prepend(pos, Element::Shape(vline));
+                        }
                     }
                     dy += row;
                 }
