@@ -184,7 +184,7 @@ impl Layout for TableNode {
             for (k, dy) in offsets(rows.iter().map(|row| row.height)).enumerate() {
                 let mut dx = Abs::zero();
                 let mut widths = layout.cols.iter();
-                for (stroke, slice) in strokes.get_horizontal(k).group_by_key(|&s| s) {
+                for (stroke, slice) in strokes.get(Axis::X, k).group_by_key(|&s| s) {
                     let length = widths.by_ref().take(slice.len()).sum();
                     if let Some(stroke) = stroke {
                         let pos = Point::new(dx, dy);
@@ -200,7 +200,7 @@ impl Layout for TableNode {
             for (k, dx) in offsets(layout.cols.iter().copied()).enumerate() {
                 let mut dy = Abs::zero();
                 let mut heights = rows.iter().map(|row| row.height);
-                for (stroke, slice) in strokes.get_vertical(k).group_by_key(|&s| s) {
+                for (stroke, slice) in strokes.get(Axis::Y, k).group_by_key(|&s| s) {
                     let length = heights.by_ref().take(slice.len()).sum();
                     if let Some(stroke) = stroke {
                         let pos = Point::new(dx, dy);
@@ -291,10 +291,8 @@ impl<T: Cast> Cast for Celled<T> {
 /// Line configuration for all cells.
 #[derive(Debug)]
 struct Strokes {
-    h_lines: Vec<Option<Stroke>>,
-    v_lines: Vec<Option<Stroke>>,
-    cols: usize,
-    rows: usize,
+    strokes: Axes<Vec<Option<Stroke>>>,
+    tracks: Axes<usize>,
 }
 
 impl Strokes {
@@ -313,52 +311,45 @@ impl Strokes {
                     prepared.push(celled.resolve(vt, x, y)?.resolve(styles));
                 }
             }
-            move |x: usize, y: usize, side, outside| {
-                prepared[y * cols + x].get(side, outside)
+            move |pos: Axes<usize>, side, outside| {
+                prepared[pos.y * cols + pos.x].get(side, outside)
             }
         };
 
-        let mut h_lines = vec![];
-        for y in 0..=rows {
-            for x in 0..cols {
-                h_lines.push(if y == 0 {
-                    mix(lines(x, y, Side::Top, true))
-                } else if y < rows {
-                    let top = lines(x, y, Side::Top, false);
-                    let bottom = lines(x, y - 1, Side::Bottom, false);
-                    mix(top.chain(bottom))
-                } else {
-                    mix(lines(x, y - 1, Side::Bottom, true))
-                });
+        let tracks = Axes::new(cols, rows);
+        let mut strokes = Axes::splat(vec![]);
+
+        for axis in [Axis::X, Axis::Y] {
+            let strokes = strokes.get_mut(axis);
+            let other = axis.other();
+            let dir = other.dir(true);
+            for a in 0..=tracks.get(other) {
+                for b in 0..tracks.get(axis) {
+                    let mut pos = Axes::new(0, 0);
+                    pos.set(other, a);
+                    pos.set(axis, b);
+                    strokes.push(if a == 0 {
+                        mix(lines(pos, dir.start(), true))
+                    } else if a < tracks.get(other) {
+                        let first = lines(pos, dir.start(), false);
+                        *pos.get_mut(other) -= 1;
+                        let second = lines(pos, dir.end(), false);
+                        mix(first.chain(second))
+                    } else {
+                        *pos.get_mut(other) -= 1;
+                        mix(lines(pos, dir.end(), true))
+                    });
+                }
             }
         }
 
-        let mut v_lines = vec![];
-        for x in 0..=cols {
-            for y in 0..rows {
-                v_lines.push(if x == 0 {
-                    mix(lines(x, y, Side::Left, true))
-                } else if x < cols {
-                    let left = lines(x, y, Side::Left, false);
-                    let right = lines(x - 1, y, Side::Right, false);
-                    mix(left.chain(right))
-                } else {
-                    mix(lines(x - 1, y, Side::Right, true))
-                });
-            }
-        }
-
-        Ok(Self { h_lines, v_lines, cols, rows })
+        Ok(Self { strokes, tracks })
     }
 
     /// Get the strokes for the k-th horizontal line.
-    fn get_horizontal(&self, k: usize) -> &[Option<Stroke>] {
-        &self.h_lines[k * self.cols..(k + 1) * self.cols]
-    }
-
-    /// Get the strokes for the k-th vertical line.
-    fn get_vertical(&self, k: usize) -> &[Option<Stroke>] {
-        &self.v_lines[k * self.rows..(k + 1) * self.rows]
+    fn get(&self, axis: Axis, k: usize) -> &[Option<Stroke>] {
+        let stride = self.tracks.get(axis);
+        &self.strokes.get_ref(axis)[k * stride..(k + 1) * stride]
     }
 }
 

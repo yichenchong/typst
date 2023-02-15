@@ -76,12 +76,12 @@ impl<T> Corners<T> {
 impl<T> Get<Corner> for Corners<T> {
     type Component = T;
 
-    fn get(self, corner: Corner) -> T {
+    fn get_ref(&self, corner: Corner) -> &T {
         match corner {
-            Corner::TopLeft => self.top_left,
-            Corner::TopRight => self.top_right,
-            Corner::BottomRight => self.bottom_right,
-            Corner::BottomLeft => self.bottom_left,
+            Corner::TopLeft => &self.top_left,
+            Corner::TopRight => &self.top_right,
+            Corner::BottomRight => &self.bottom_right,
+            Corner::BottomLeft => &self.bottom_left,
         }
     }
 

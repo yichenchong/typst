@@ -91,12 +91,12 @@ impl Sides<Rel<Abs>> {
 impl<T> Get<Side> for Sides<T> {
     type Component = T;
 
-    fn get(self, side: Side) -> T {
+    fn get_ref(&self, side: Side) -> &T {
         match side {
-            Side::Left => self.left,
-            Side::Top => self.top,
-            Side::Right => self.right,
-            Side::Bottom => self.bottom,
+            Side::Left => &self.left,
+            Side::Top => &self.top,
+            Side::Right => &self.right,
+            Side::Bottom => &self.bottom,
         }
     }
 
