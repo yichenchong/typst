@@ -47,18 +47,6 @@ use crate::prelude::*;
 ///   See the [grid documentation]($func/grid) for more information on track
 ///   sizing.
 ///
-/// - gutter: `TrackSizings` (named)
-///   Defines the gaps between rows & columns.
-///   See the [grid documentation]($func/grid) for more information on gutters.
-///
-/// - column-gutter: `TrackSizings` (named)
-///   Defines the gaps between columns. Takes precedence over `gutter`.
-///   See the [grid documentation]($func/grid) for more information on gutters.
-///
-/// - row-gutter: `TrackSizings` (named)
-///   Defines the gaps between rows. Takes precedence over `gutter`.
-///   See the [grid documentation]($func/grid) for more information on gutters.
-///
 /// ## Category
 /// layout
 #[func]
@@ -67,8 +55,6 @@ use crate::prelude::*;
 pub struct TableNode {
     /// Defines sizing for content rows and columns.
     pub tracks: Axes<Vec<Sizing>>,
-    /// Defines sizing of gutter rows and columns between content.
-    pub gutter: Axes<Vec<Sizing>>,
     /// The content to be arranged in the table.
     pub cells: Vec<Content>,
 }
@@ -123,15 +109,8 @@ impl TableNode {
     fn construct(_: &Vm, args: &mut Args) -> SourceResult<Content> {
         let TrackSizings(columns) = args.named("columns")?.unwrap_or_default();
         let TrackSizings(rows) = args.named("rows")?.unwrap_or_default();
-        let TrackSizings(base_gutter) = args.named("gutter")?.unwrap_or_default();
-        let column_gutter = args.named("column-gutter")?.map(|TrackSizings(v)| v);
-        let row_gutter = args.named("row-gutter")?.map(|TrackSizings(v)| v);
         Ok(Self {
             tracks: Axes::new(columns, rows),
-            gutter: Axes::new(
-                column_gutter.unwrap_or_else(|| base_gutter.clone()),
-                row_gutter.unwrap_or(base_gutter),
-            ),
             cells: args.all()?,
         }
         .pack())
@@ -141,8 +120,6 @@ impl TableNode {
         match name {
             "columns" => Some(Sizing::encode_slice(&self.tracks.x)),
             "rows" => Some(Sizing::encode_slice(&self.tracks.y)),
-            "column-gutter" => Some(Sizing::encode_slice(&self.gutter.x)),
-            "row-gutter" => Some(Sizing::encode_slice(&self.gutter.y)),
             "cells" => Some(Value::Array(
                 self.cells.iter().cloned().map(Value::Content).collect(),
             )),
@@ -162,12 +139,16 @@ impl Layout for TableNode {
             return Ok(Fragment::frame(Frame::new(Size::zero())));
         }
 
-        let inset = styles.get(Self::INSET);
-        let align = styles.get(Self::ALIGN);
         let cols = self.tracks.x.len().max(1);
         let rows = (self.cells.len() as f64 / cols as f64).ceil() as usize;
 
-        // Apply alignments.
+        // Resolve properties.
+        let inset = styles.get(Self::INSET);
+        let align = styles.get(Self::ALIGN);
+        let fill = styles.get(Self::FILL);
+        let strokes = Strokes::resolve(vt, styles, Axes::new(cols, rows))?;
+
+        // Apply alignments and insets.
         let cells: Vec<_> = self
             .cells
             .iter()
@@ -188,7 +169,7 @@ impl Layout for TableNode {
         let layouter = GridLayouter::new(
             vt,
             self.tracks.as_deref(),
-            self.gutter.as_deref(),
+            Axes::splat(&[]),
             &cells,
             regions,
             styles,
@@ -196,9 +177,6 @@ impl Layout for TableNode {
 
         // Measure the columns and layout the grid row-by-row.
         let mut layout = layouter.layout()?;
-
-        let fill = styles.get(Self::FILL);
-        let strokes = Strokes::resolve(vt, styles, Axes::new(cols, rows))?;
         let mut buffer = vec![];
 
         // Render strokes.
