@@ -1,5 +1,8 @@
 #table(
   columns: (1fr,) * 3,
-  stroke: 8pt,
+  stroke: (
+    outside: 2pt,
+    inside: 1pt,
+  ),
   ..([Hello],) * 10
 )

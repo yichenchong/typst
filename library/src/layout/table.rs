@@ -146,7 +146,7 @@ impl Layout for TableNode {
         let inset = styles.get(Self::INSET);
         let align = styles.get(Self::ALIGN);
         let fill = styles.get(Self::FILL);
-        let strokes = Strokes::resolve(vt, styles, Axes::new(cols, rows))?;
+        let strokes = Strokes::resolve(vt, styles, cols, rows)?;
 
         // Apply alignments and insets.
         let cells: Vec<_> = self
@@ -177,24 +177,15 @@ impl Layout for TableNode {
 
         // Measure the columns and layout the grid row-by-row.
         let mut layout = layouter.layout()?;
-        let mut buffer = vec![];
 
         // Render strokes.
         for (frame, rows) in layout.fragment.iter_mut().zip(&layout.rows) {
             // Render horizontal lines.
             for (k, dy) in offsets(rows.iter().map(|row| row.height)).enumerate() {
                 let mut dx = Abs::zero();
-                buffer.clear();
-                buffer.extend(
-                    layout
-                        .cols
-                        .iter()
-                        .enumerate()
-                        .map(|(x, &col)| (strokes.get_horizontal(x, k), col)),
-                );
-
-                for (stroke, slice) in buffer.group_by_key(|&(s, _)| s) {
-                    let length = slice.iter().map(|&(_, col)| col).sum();
+                let mut widths = layout.cols.iter();
+                for (stroke, slice) in strokes.get_horizontal(k).group_by_key(|&s| s) {
+                    let length = widths.by_ref().take(slice.len()).sum();
                     if let Some(stroke) = stroke {
                         let pos = Point::new(dx, dy);
                         let target = Point::with_x(length);
@@ -208,13 +199,9 @@ impl Layout for TableNode {
             // Render vertical lines.
             for (k, dx) in offsets(layout.cols.iter().copied()).enumerate() {
                 let mut dy = Abs::zero();
-                buffer.clear();
-                buffer.extend(
-                    rows.iter().map(|row| (strokes.get_vertical(k, row.y), row.height)),
-                );
-
-                for (stroke, slice) in buffer.group_by_key(|&(s, _)| s) {
-                    let length = slice.iter().map(|&(_, height)| height).sum();
+                let mut heights = rows.iter().map(|row| row.height);
+                for (stroke, slice) in strokes.get_vertical(k).group_by_key(|&s| s) {
+                    let length = heights.by_ref().take(slice.len()).sum();
                     if let Some(stroke) = stroke {
                         let pos = Point::new(dx, dy);
                         let target = Point::with_y(length);
@@ -303,84 +290,86 @@ impl<T: Cast> Cast for Celled<T> {
 
 /// Line configuration for all cells.
 #[derive(Debug)]
-enum Strokes {
-    Uniform(Lines<Abs>, Axes<usize>),
-    Varying(Vec<Lines<Abs>>, Axes<usize>),
+struct Strokes {
+    h_lines: Vec<Option<Stroke>>,
+    v_lines: Vec<Option<Stroke>>,
+    cols: usize,
+    rows: usize,
 }
 
 impl Strokes {
     /// Resolve the line configuration for all cells.
-    fn resolve(vt: &Vt, styles: StyleChain, tracks: Axes<usize>) -> SourceResult<Self> {
-        Ok(match styles.get(TableNode::STROKE) {
-            Celled::Value(value) => Self::Uniform(value.resolve(styles), tracks),
-            celled @ Celled::Func(_) => {
-                let mut vec = vec![];
-                for y in 0..tracks.y {
-                    for x in 0..tracks.x {
-                        vec.push(celled.resolve(vt, x, y)?.resolve(styles));
-                    }
+    fn resolve(
+        vt: &Vt,
+        styles: StyleChain,
+        cols: usize,
+        rows: usize,
+    ) -> SourceResult<Self> {
+        let lines = {
+            let celled = styles.get(TableNode::STROKE);
+            let mut prepared: Vec<Lines<Abs>> = vec![];
+            for y in 0..rows {
+                for x in 0..cols {
+                    prepared.push(celled.resolve(vt, x, y)?.resolve(styles));
                 }
-                Self::Varying(vec, tracks)
             }
-        })
-    }
-
-    /// Get the stroke for the `k`-th vertical line in row `y`.
-    fn get_vertical(&self, k: usize, y: usize) -> Option<Stroke> {
-        let tracks = match *self {
-            Self::Uniform(_, tracks) => tracks,
-            Self::Varying(_, tracks) => tracks,
+            move |x: usize, y: usize, side, outside| {
+                prepared[y * cols + x].get(side, outside)
+            }
         };
 
-        if k == 0 {
-            mix(self.lines(k, y).get(Side::Left, true))
-        } else if k < tracks.x {
-            mix(self
-                .lines(k, y)
-                .get(Side::Left, false)
-                .chain(self.lines(k - 1, y).get(Side::Right, false)))
-        } else {
-            mix(self.lines(k - 1, y).get(Side::Right, true))
+        let mut h_lines = vec![];
+        for y in 0..=rows {
+            for x in 0..cols {
+                h_lines.push(if y == 0 {
+                    mix(lines(x, y, Side::Top, true))
+                } else if y < rows {
+                    let top = lines(x, y, Side::Top, false);
+                    let bottom = lines(x, y - 1, Side::Bottom, false);
+                    mix(top.chain(bottom))
+                } else {
+                    mix(lines(x, y - 1, Side::Bottom, true))
+                });
+            }
         }
+
+        let mut v_lines = vec![];
+        for x in 0..=cols {
+            for y in 0..rows {
+                v_lines.push(if x == 0 {
+                    mix(lines(x, y, Side::Left, true))
+                } else if x < cols {
+                    let left = lines(x, y, Side::Left, false);
+                    let right = lines(x - 1, y, Side::Right, false);
+                    mix(left.chain(right))
+                } else {
+                    mix(lines(x - 1, y, Side::Right, true))
+                });
+            }
+        }
+
+        Ok(Self { h_lines, v_lines, cols, rows })
     }
 
-    /// Get the stroke for the `k`-th horizontal line in column `x`.
-    fn get_horizontal(&self, x: usize, k: usize) -> Option<Stroke> {
-        let tracks = match *self {
-            Self::Uniform(_, tracks) => tracks,
-            Self::Varying(_, tracks) => tracks,
-        };
-
-        if k == 0 {
-            mix(self.lines(x, k).get(Side::Top, true))
-        } else if k < tracks.y {
-            mix(self
-                .lines(x, k)
-                .get(Side::Top, false)
-                .chain(self.lines(x, k - 1).get(Side::Bottom, false)))
-        } else {
-            mix(self.lines(x, k - 1).get(Side::Bottom, true))
-        }
+    /// Get the strokes for the k-th horizontal line.
+    fn get_horizontal(&self, k: usize) -> &[Option<Stroke>] {
+        &self.h_lines[k * self.cols..(k + 1) * self.cols]
     }
 
-    /// Get the configuration for the given cell.
-    #[track_caller]
-    fn lines(&self, x: usize, y: usize) -> &Lines<Abs> {
-        match self {
-            Self::Uniform(lines, _) => lines,
-            Self::Varying(list, tracks) => &list[y * tracks.x + x],
-        }
+    /// Get the strokes for the k-th vertical line.
+    fn get_vertical(&self, k: usize) -> &[Option<Stroke>] {
+        &self.v_lines[k * self.rows..(k + 1) * self.rows]
     }
 }
 
 /// Combine strokes by priority.
 fn mix(
-    iter: impl Iterator<Item = (Option<PartialStroke<Abs>>, usize)>,
+    iter: impl Iterator<Item = (usize, Option<PartialStroke<Abs>>)>,
 ) -> Option<Stroke> {
     let mut vec: ArrayVec<_, 6> = iter.collect();
-    vec.sort_by_key(|&(_, p)| p);
+    vec.sort_by_key(|&(p, _)| p);
     vec.into_iter()
-        .map(|(stroke, _)| stroke)
+        .map(|(_, stroke)| stroke)
         .reduce(|first, second| first.fold(second))?
         .map(PartialStroke::unwrap_or_default)
 }
@@ -388,23 +377,17 @@ fn mix(
 /// Line configuration for a cell.
 #[derive(Debug, Copy, Clone, PartialEq, Hash)]
 pub struct Lines<T = Length> {
-    pub left: Option<Option<PartialStroke<T>>>,
-    pub top: Option<Option<PartialStroke<T>>>,
-    pub right: Option<Option<PartialStroke<T>>>,
-    pub bottom: Option<Option<PartialStroke<T>>>,
-    pub inside: Option<Option<PartialStroke<T>>>,
-    pub outside: Option<Option<PartialStroke<T>>>,
-    pub rest: Option<Option<PartialStroke<T>>>,
+    sides: Sides<Option<Option<PartialStroke<T>>>>,
+    inside: Option<Option<PartialStroke<T>>>,
+    outside: Option<Option<PartialStroke<T>>>,
+    rest: Option<Option<PartialStroke<T>>>,
 }
 
 impl<T> Lines<T> {
     /// Equal lines on all sides.
     fn splat(value: Option<PartialStroke<T>>) -> Self {
         Self {
-            left: None,
-            top: None,
-            right: None,
-            bottom: None,
+            sides: Sides::default(),
             inside: None,
             outside: None,
             rest: Some(value),
@@ -413,21 +396,18 @@ impl<T> Lines<T> {
 }
 
 impl Lines<Abs> {
-    /// Get the values and priorities for the given side.
+    /// Get the prioritized values for the given side.
     fn get(
         &self,
         side: Side,
         outside: bool,
-    ) -> impl Iterator<Item = (Option<PartialStroke<Abs>>, usize)> {
-        let mid = if outside { self.outside } else { self.inside };
-        match side {
-            Side::Left => [(self.left, 1), (mid, 2), (self.rest, 3)],
-            Side::Top => [(self.top, 1), (mid, 2), (self.rest, 3)],
-            Side::Right => [(self.right, 1), (mid, 2), (self.rest, 3)],
-            Side::Bottom => [(self.bottom, 1), (mid, 2), (self.rest, 3)],
-        }
-        .into_iter()
-        .filter_map(|(s, p)| s.map(|s| (s, p)))
+    ) -> impl Iterator<Item = (usize, Option<PartialStroke<Abs>>)> {
+        let first = self.sides.get(side);
+        let second = if outside { self.outside } else { self.inside };
+        [first, second, self.rest]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(p, s)| s.map(|s| (p, s)))
     }
 }
 
@@ -436,10 +416,7 @@ impl Resolve for Lines {
 
     fn resolve(self, styles: StyleChain) -> Self::Output {
         Lines {
-            left: self.left.resolve(styles),
-            top: self.top.resolve(styles),
-            right: self.right.resolve(styles),
-            bottom: self.bottom.resolve(styles),
+            sides: self.sides.resolve(styles),
             inside: self.inside.resolve(styles),
             outside: self.outside.resolve(styles),
             rest: self.rest.resolve(styles),
@@ -455,10 +432,12 @@ castable! {
         let x = take("x")?;
         let y = take("y")?;
         let lines = Self {
-            left: take("left")?.or(x),
-            top: take("top")?.or(y),
-            right: take("right")?.or(x),
-            bottom: take("bottom")?.or(y),
+            sides: Sides {
+                left: take("left")?.or(x),
+                top: take("top")?.or(y),
+                right: take("right")?.or(x),
+                bottom: take("bottom")?.or(y),
+            },
             inside: take("inside")?,
             outside: take("outside")?,
             rest: take("rest")?,
