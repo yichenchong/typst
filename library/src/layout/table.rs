@@ -269,6 +269,15 @@ impl Layout for TableNode {
                     let target = dy + row;
                     dy += row;
 
+                    if i == 0 || segments[i - 1].is_none() {
+                        origin -= strokes.thickness(Axis::X, start + i) / 2.0;
+                    }
+
+                    let mut target = dy + row;
+                    if i + 1 == rows.len() || segments[i + 1].is_none() {
+                        target += strokes.thickness(Axis::X, start + i + 1) / 2.0;
+                    }
+
                     let Some(stroke) = stroke else { continue };
                     if let Some(prev) = continuation.take() {
                         origin = prev;
