@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use typst::util::SliceExt;
 
 use crate::layout::{AlignNode, GridLayouter, Sizing, TrackSizings};
@@ -353,18 +354,16 @@ impl Strokes {
             Self::Varying(_, tracks) => tracks,
         };
 
-        let (stroke, _) = if k == 0 {
-            self.lines(k, y).get(Side::Left, true).max_by_key(key)
+        if k == 0 {
+            mix(self.lines(k, y).get(Side::Left, true))
         } else if k < tracks.x {
-            self.lines(k, y)
+            mix(self
+                .lines(k, y)
                 .get(Side::Left, false)
-                .chain(self.lines(k - 1, y).get(Side::Right, false))
-                .max_by_key(key)
+                .chain(self.lines(k - 1, y).get(Side::Right, false)))
         } else {
-            self.lines(k - 1, y).get(Side::Right, true).max_by_key(key)
-        }?;
-
-        stroke.map(PartialStroke::unwrap_or_default)
+            mix(self.lines(k - 1, y).get(Side::Right, true))
+        }
     }
 
     /// Get the stroke for the `k`-th horizontal line in column `x`.
@@ -374,18 +373,16 @@ impl Strokes {
             Self::Varying(_, tracks) => tracks,
         };
 
-        let (stroke, _) = if k == 0 {
-            self.lines(x, k).get(Side::Top, true).max_by_key(key)
+        if k == 0 {
+            mix(self.lines(x, k).get(Side::Top, true))
         } else if k < tracks.y {
-            self.lines(x, k)
+            mix(self
+                .lines(x, k)
                 .get(Side::Top, false)
-                .chain(self.lines(x, k - 1).get(Side::Bottom, false))
-                .max_by_key(key)
+                .chain(self.lines(x, k - 1).get(Side::Bottom, false)))
         } else {
-            self.lines(x, k - 1).get(Side::Bottom, true).max_by_key(key)
-        }?;
-
-        stroke.map(PartialStroke::unwrap_or_default)
+            mix(self.lines(x, k - 1).get(Side::Bottom, true))
+        }
     }
 
     /// Get the configuration for the given cell.
@@ -398,8 +395,16 @@ impl Strokes {
     }
 }
 
-fn key(&(_, priority): &(Option<PartialStroke<Abs>>, usize)) -> usize {
-    priority
+/// Combine strokes by priority.
+fn mix(
+    iter: impl Iterator<Item = (Option<PartialStroke<Abs>>, usize)>,
+) -> Option<Stroke> {
+    let mut vec: ArrayVec<_, 6> = iter.collect();
+    vec.sort_by_key(|&(_, p)| p);
+    vec.into_iter()
+        .map(|(stroke, _)| stroke)
+        .reduce(|first, second| first.fold(second))?
+        .map(PartialStroke::unwrap_or_default)
 }
 
 /// Line configuration for a cell.
@@ -438,10 +443,10 @@ impl Lines<Abs> {
     ) -> impl Iterator<Item = (Option<PartialStroke<Abs>>, usize)> {
         let mid = if outside { self.outside } else { self.inside };
         match side {
-            Side::Left => [(self.left, 3), (mid, 2), (self.rest, 1)],
-            Side::Top => [(self.top, 3), (mid, 2), (self.rest, 1)],
-            Side::Right => [(self.right, 3), (mid, 2), (self.rest, 1)],
-            Side::Bottom => [(self.bottom, 3), (mid, 2), (self.rest, 1)],
+            Side::Left => [(self.left, 1), (mid, 2), (self.rest, 3)],
+            Side::Top => [(self.top, 1), (mid, 2), (self.rest, 3)],
+            Side::Right => [(self.right, 1), (mid, 2), (self.rest, 3)],
+            Side::Bottom => [(self.bottom, 1), (mid, 2), (self.rest, 3)],
         }
         .into_iter()
         .filter_map(|(s, p)| s.map(|s| (s, p)))

@@ -12,6 +12,7 @@ bench = false
 [dependencies]
 typst = { path = ".." }
 comemo = { git = "https://github.com/typst/comemo" }
+arrayvec = "0.7"
 csv = "1"
 hypher = "0.1"
 kurbo = "0.8"
