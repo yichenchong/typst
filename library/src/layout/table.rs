@@ -154,9 +154,39 @@ impl Layout for TableNode {
             .cloned()
             .enumerate()
             .map(|(i, child)| {
+                let mut child = child.clone();
                 let x = i % cols;
                 let y = i / cols;
-                let mut child = child.padded(Sides::splat(inset.resolve(vt, x, y)?));
+
+                let mut thicknesses = Sides {
+                    left: thickness(strokes.get(Axis::Y, x)[y]),
+                    right: thickness(strokes.get(Axis::Y, x + 1)[y]),
+                    top: thickness(strokes.get(Axis::X, y)[x]),
+                    bottom: thickness(strokes.get(Axis::X, y + 1)[x]),
+                };
+
+                if x > 0 {
+                    thicknesses.left /= 2.0;
+                }
+                if x + 1 < cols {
+                    thicknesses.right /= 2.0;
+                }
+                if y > 0 {
+                    thicknesses.top /= 2.0;
+                }
+                if y + 1 < rows {
+                    thicknesses.bottom /= 2.0;
+                }
+
+                if thicknesses.iter().any(|t| !t.is_zero()) {
+                    child = child.padded(thicknesses.map(Rel::from));
+                }
+
+                let inset = inset.resolve(vt, x, y)?;
+                if !inset.is_zero() {
+                    child = child.padded(Sides::splat(inset));
+                }
+
                 if let Smart::Custom(alignment) = align.resolve(vt, x, y)? {
                     child = child.styled(AlignNode::ALIGNS, alignment)
                 }
@@ -191,30 +221,26 @@ impl Layout for TableNode {
 
                     let left = strokes.get(Axis::Y, i);
                     let mut lpad = if k == 0 {
-                        left[start + k].map_or(Abs::zero(), |s| s.thickness)
+                        thickness(left[start + k])
                     } else if k == rows.len() {
-                        left[start + k - 1].map_or(Abs::zero(), |s| s.thickness)
+                        thickness(left[start + k - 1])
                     } else {
-                        left[start + k - 1]
-                            .map_or(Abs::zero(), |s| s.thickness)
-                            .max(left[start + k].map_or(Abs::zero(), |s| s.thickness))
+                        thickness(left[start + k - 1]).max(thickness(left[start + k]))
                     };
 
                     let right = strokes.get(Axis::Y, i + 1);
                     let mut rpad = if k == 0 {
-                        right[start + k].map_or(Abs::zero(), |s| s.thickness)
+                        thickness(right[start + k])
                     } else if k == rows.len() {
-                        right[start + k - 1].map_or(Abs::zero(), |s| s.thickness)
+                        thickness(right[start + k - 1])
                     } else {
-                        right[start + k - 1]
-                            .map_or(Abs::zero(), |s| s.thickness)
-                            .max(right[start + k].map_or(Abs::zero(), |s| s.thickness))
+                        thickness(right[start + k - 1]).max(thickness(right[start + k]))
                     };
 
                     if i > 0 {
                         lpad /= 2.0;
                     }
-                    if i + 1 < layout.cols.len() {
+                    if i + 1 < cols {
                         rpad /= 2.0;
                     }
 
@@ -400,16 +426,6 @@ impl Strokes {
         let stride = self.tracks.get(axis);
         &self.strokes.get_ref(axis)[k * stride..(k + 1) * stride]
     }
-
-    // / Get the maximum thickness of the two vertical line adjacent to the
-    // / k-th horizontal line track in column `x`.
-    // fn thickness(&self, x: usize, k: usize) -> Abs {
-    //     self.get(Axis::X, k)
-    //         .iter()
-    //         .map(|s| s.map_or(Abs::zero(), |s| s.thickness))
-    //         .max()
-    //         .unwrap_or_default()
-    // }
 }
 
 /// Combine strokes by priority.
@@ -422,6 +438,11 @@ fn mix(
         .map(|(_, stroke)| stroke)
         .reduce(|first, second| first.fold(second))?
         .map(PartialStroke::unwrap_or_default)
+}
+
+/// Get the thickness of an optional stroke.
+fn thickness(stroke: Option<Stroke>) -> Abs {
+    stroke.map_or(Abs::zero(), |s| s.thickness)
 }
 
 /// Line configuration for a cell.
