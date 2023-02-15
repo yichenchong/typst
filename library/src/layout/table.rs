@@ -188,11 +188,11 @@ impl Layout for TableNode {
                     if let Some(stroke) = stroke {
                         let lpad = strokes.thickness(Axis::Y, i) / 2.0;
                         let rpad = strokes.thickness(Axis::Y, i + 1) / 2.0;
-                        let pos = Point::new(dx + lpad, dy);
+                        let origin = dx + lpad;
                         let target = dx + col - rpad;
-                        let delta = Point::with_x(target - pos.x);
+                        let delta = Point::with_x(target - origin);
                         let hline = Geometry::Line(delta).stroked(stroke);
-                        frame.prepend(pos, Element::Shape(hline));
+                        frame.prepend(Point::new(origin, dy), Element::Shape(hline));
                     }
                     dx += col;
                 }
@@ -205,24 +205,26 @@ impl Layout for TableNode {
                 let mut continuation = None;
                 for (i, (&row, &stroke)) in rows.iter().zip(segments).enumerate() {
                     if let Some(stroke) = stroke {
-                        let mut pos = Point::new(dx, dy);
-                        let mut target = dy + row;
+                        let mut origin = dy;
                         if i == 0 || segments[i - 1].is_none() {
-                            pos.y -= strokes.thickness(Axis::X, start + i) / 2.0;
-                        } else if i + 1 == rows.len() || segments[i + 1].is_none() {
+                            origin -= strokes.thickness(Axis::X, start + i) / 2.0;
+                        }
+
+                        let mut target = dy + row;
+                        if i + 1 == rows.len() || segments[i + 1].is_none() {
                             target += strokes.thickness(Axis::X, start + i + 1) / 2.0;
                         }
 
                         if let Some(prev) = continuation.take() {
-                            pos.y = prev;
+                            origin = prev;
                         }
 
                         if segments.get(i + 1) == Some(&Some(stroke)) {
-                            continuation = Some(pos.y);
+                            continuation = Some(origin);
                         } else {
-                            let delta = Point::with_y(target - pos.y);
+                            let delta = Point::with_y(target - origin);
                             let vline = Geometry::Line(delta).stroked(stroke);
-                            frame.prepend(pos, Element::Shape(vline));
+                            frame.prepend(Point::new(dx, origin), Element::Shape(vline));
                         }
                     }
                     dy += row;
