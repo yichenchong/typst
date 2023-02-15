@@ -288,7 +288,7 @@ impl<T: Cast> Cast for Celled<T> {
     }
 }
 
-/// Line configuration for all cells.
+/// Resolved strokes for all separators.
 #[derive(Debug)]
 struct Strokes {
     strokes: Axes<Vec<Option<Stroke>>>,
@@ -303,6 +303,7 @@ impl Strokes {
         cols: usize,
         rows: usize,
     ) -> SourceResult<Self> {
+        let tracks = Axes::new(cols, rows);
         let lines = {
             let celled = styles.get(TableNode::STROKE);
             let mut prepared: Vec<Lines<Abs>> = vec![];
@@ -311,33 +312,30 @@ impl Strokes {
                     prepared.push(celled.resolve(vt, x, y)?.resolve(styles));
                 }
             }
-            move |pos: Axes<usize>, side, outside| {
+            move |axis, main, cross, side, outside| {
+                let pos: Axes<usize> = match axis {
+                    Axis::X => Axes::new(main, cross),
+                    Axis::Y => Axes::new(cross, main),
+                };
                 prepared[pos.y * cols + pos.x].get(side, outside)
             }
         };
 
-        let tracks = Axes::new(cols, rows);
         let mut strokes = Axes::splat(vec![]);
-
         for axis in [Axis::X, Axis::Y] {
             let strokes = strokes.get_mut(axis);
             let other = axis.other();
             let dir = other.dir(true);
-            for a in 0..=tracks.get(other) {
-                for b in 0..tracks.get(axis) {
-                    let mut pos = Axes::new(0, 0);
-                    pos.set(other, a);
-                    pos.set(axis, b);
-                    strokes.push(if a == 0 {
-                        mix(lines(pos, dir.start(), true))
-                    } else if a < tracks.get(other) {
-                        let first = lines(pos, dir.start(), false);
-                        *pos.get_mut(other) -= 1;
-                        let second = lines(pos, dir.end(), false);
+            for cross in 0..=tracks.get(other) {
+                for main in 0..tracks.get(axis) {
+                    strokes.push(if cross == 0 {
+                        mix(lines(axis, main, cross, dir.start(), true))
+                    } else if cross < tracks.get(other) {
+                        let first = lines(axis, main, cross, dir.start(), false);
+                        let second = lines(axis, main, cross - 1, dir.end(), false);
                         mix(first.chain(second))
                     } else {
-                        *pos.get_mut(other) -= 1;
-                        mix(lines(pos, dir.end(), true))
+                        mix(lines(axis, main, cross - 1, dir.end(), true))
                     });
                 }
             }
@@ -346,7 +344,7 @@ impl Strokes {
         Ok(Self { strokes, tracks })
     }
 
-    /// Get the strokes for the k-th horizontal line.
+    /// Get the strokes for the k-th separator line on the given axis.
     fn get(&self, axis: Axis, k: usize) -> &[Option<Stroke>] {
         let stride = self.tracks.get(axis);
         &self.strokes.get_ref(axis)[k * stride..(k + 1) * stride]
