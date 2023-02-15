@@ -135,7 +135,7 @@ impl RectNode {
     /// ```example
     /// #rect(inset: 0pt)[Tight])
     /// ```
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Abs::pt(5.0).into());
 
     /// How much to expand the rectangle's size without affecting the layout.
@@ -244,7 +244,7 @@ impl SquareNode {
     /// documentation]($func/rect.inset) for more details.
     ///
     /// The default value is `{5pt}`.
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Abs::pt(5.0).into());
 
     /// How much to expand the square's size without affecting the layout. See
@@ -347,7 +347,7 @@ impl EllipseNode {
     /// documentation]($func/rect.inset) for more details.
     ///
     /// The default value is `{5pt}`.
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Abs::pt(5.0).into());
 
     /// How much to expand the ellipse's size without affecting the layout. See
@@ -449,7 +449,7 @@ impl CircleNode {
     /// documentation]($func/rect.inset) for more details.
     ///
     /// The default value is `{5pt}`.
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Abs::pt(5.0).into());
 
     /// How much to expand the circle's size without affecting the layout. See
@@ -509,7 +509,7 @@ fn layout(
     sizing: Axes<Smart<Rel<Length>>>,
     fill: Option<Paint>,
     stroke: Smart<Sides<Option<PartialStroke<Abs>>>>,
-    mut inset: Sides<Rel<Abs>>,
+    mut inset: Sides<Rel<Length>>,
     outset: Sides<Rel<Abs>>,
     radius: Corners<Rel<Abs>>,
 ) -> SourceResult<Fragment> {
@@ -517,15 +517,33 @@ fn layout(
         .zip(regions.base())
         .map(|(s, r)| s.map(|v| v.resolve(styles).relative_to(r)));
 
+    // Prepare stroke.
+    let stroke = match stroke {
+        Smart::Auto if fill.is_none() => Sides::splat(Some(Stroke::default())),
+        Smart::Auto => Sides::splat(None),
+        Smart::Custom(strokes) => {
+            strokes.map(|s| s.map(PartialStroke::unwrap_or_default))
+        }
+    };
+
     let mut frame;
     if let Some(child) = body {
         let region = resolved.unwrap_or(regions.base());
+        let mut child = child.clone();
         if kind.is_round() {
-            inset = inset.map(|side| side + Ratio::new(0.5 - SQRT_2 / 4.0));
+            child = child.padded(Sides::splat(Ratio::new(0.5 - SQRT_2 / 4.0).into()));
+        }
+
+        // Add extra inset for stroke.
+        inset = inset
+            .zip(stroke.map(|s| s.map_or(Abs::zero(), |s| s.thickness)))
+            .map(|(s, t)| s + Rel::from(t));
+
+        if inset.iter().any(|v| !v.is_zero()) {
+            child = child.padded(inset);
         }
 
         // Pad the child.
-        let child = child.clone().padded(inset.map(|side| side.map(Length::from)));
         let expand = sizing.as_ref().map(Smart::is_custom);
         let pod = Regions::one(region, expand);
         frame = child.layout(vt, styles, pod)?.into_frame();
@@ -549,25 +567,12 @@ fn layout(
         frame = Frame::new(size);
     }
 
-    // Prepare stroke.
-    let stroke = match stroke {
-        Smart::Auto if fill.is_none() => Sides::splat(Some(Stroke::default())),
-        Smart::Auto => Sides::splat(None),
-        Smart::Custom(strokes) => {
-            strokes.map(|s| s.map(PartialStroke::unwrap_or_default))
-        }
-    };
-
     // Add fill and/or stroke.
     if fill.is_some() || stroke.iter().any(Option::is_some) {
         if kind.is_round() {
-            let outset = outset.relative_to(frame.size());
-            let size = frame.size() + outset.sum_by_axis();
-            let pos = Point::new(-outset.left, -outset.top);
-            let shape = ellipse(size, fill, stroke.left);
-            frame.prepend(pos, Element::Shape(shape));
+            frame.ellipse_background(fill, stroke, outset);
         } else {
-            frame.fill_and_stroke(fill, stroke, outset, radius);
+            frame.rect_background(fill, stroke, outset, radius);
         }
     }
 

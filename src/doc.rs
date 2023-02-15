@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use crate::font::Font;
 use crate::geom::{
-    self, rounded_rect, Abs, Align, Axes, Color, Corners, Dir, Em, Geometry, Numeric,
-    Paint, Point, Rel, RgbaColor, Shape, Sides, Size, Stroke, Transform,
+    self, ellipse, rounded_rect, Abs, Align, Axes, Color, Corners, Dir, Em, Geometry,
+    Numeric, Paint, Point, Rel, RgbaColor, Shape, Sides, Size, Stroke, Transform,
 };
 use crate::image::Image;
 use crate::model::{
@@ -269,39 +269,6 @@ impl Frame {
         }
     }
 
-    /// Attach the metadata from this style chain to the frame.
-    pub fn meta(&mut self, styles: StyleChain) {
-        if self.is_empty() {
-            return;
-        }
-        for meta in styles.get(Meta::DATA) {
-            if matches!(meta, Meta::Hidden) {
-                self.clear();
-                break;
-            }
-            self.push(Point::zero(), Element::Meta(meta, self.size));
-        }
-    }
-
-    /// Add a fill and stroke with optional radius and outset to the frame.
-    pub fn fill_and_stroke(
-        &mut self,
-        fill: Option<Paint>,
-        stroke: Sides<Option<Stroke>>,
-        outset: Sides<Rel<Abs>>,
-        radius: Corners<Rel<Abs>>,
-    ) {
-        let outset = outset.relative_to(self.size());
-        let size = self.size() + outset.sum_by_axis();
-        let pos = Point::new(-outset.left, -outset.top);
-        let radius = radius.map(|side| side.relative_to(size.x.min(size.y) / 2.0));
-        self.prepend_multiple(
-            rounded_rect(size, radius, fill, stroke)
-                .into_iter()
-                .map(|x| (pos, Element::Shape(x))),
-        )
-    }
-
     /// Arbitrarily transform the contents of the frame.
     pub fn transform(&mut self, transform: Transform) {
         if !self.is_empty() {
@@ -316,6 +283,20 @@ impl Frame {
         }
     }
 
+    /// Attach the metadata from this style chain to the frame.
+    pub fn meta(&mut self, styles: StyleChain) {
+        if self.is_empty() {
+            return;
+        }
+        for meta in styles.get(Meta::DATA) {
+            if matches!(meta, Meta::Hidden) {
+                self.clear();
+                break;
+            }
+            self.push(Point::zero(), Element::Meta(meta, self.size));
+        }
+    }
+
     /// Wrap the frame's contents in a group and modify that group with `f`.
     fn group<F>(&mut self, f: F)
     where
@@ -327,6 +308,58 @@ impl Frame {
         f(&mut group);
         wrapper.push(Point::zero(), Element::Group(group));
         *self = wrapper;
+    }
+}
+
+/// Painting.
+impl Frame {
+    /// Add a simple background fill.
+    pub fn fill(&mut self, fill: Paint) {
+        let shape = Geometry::Rect(self.size()).filled(fill);
+        self.prepend(Point::zero(), Element::Shape(shape))
+    }
+
+    /// Add a filled and stroked rectangle with optional radius and outset as a
+    /// background.
+    ///
+    /// The strokes will be inside strokes, that is, fully contained in the
+    /// frame.
+    pub fn rect_background(
+        &mut self,
+        fill: Option<Paint>,
+        stroke: Sides<Option<Stroke>>,
+        outset: Sides<Rel<Abs>>,
+        radius: Corners<Rel<Abs>>,
+    ) {
+        let outset = outset
+            .relative_to(self.size())
+            .zip(stroke)
+            .map(|(v, s)| v - s.map_or(Abs::zero(), |s| s.thickness / 2.0));
+        let size = self.size() + outset.sum_by_axis();
+        let pos = Point::new(-outset.left, -outset.top);
+        let radius = radius.map(|side| side.relative_to(size.x.min(size.y) / 2.0));
+        let shapes = rounded_rect(size, radius, fill, stroke);
+        self.prepend_multiple(shapes.into_iter().map(|x| (pos, Element::Shape(x))))
+    }
+
+    /// Add a filled and stroked ellipse with optional outset as a background.
+    ///
+    /// The strokes will be inside strokes, that is, fully contained in the
+    /// frame.
+    pub fn ellipse_background(
+        &mut self,
+        fill: Option<Paint>,
+        stroke: Sides<Option<Stroke>>,
+        outset: Sides<Rel<Abs>>,
+    ) {
+        let outset = outset
+            .relative_to(self.size())
+            .zip(stroke)
+            .map(|(v, s)| v - s.map_or(Abs::zero(), |s| s.thickness / 2.0));
+        let size = self.size() + outset.sum_by_axis();
+        let pos = Point::new(-outset.left, -outset.top);
+        let shape = ellipse(size, fill, stroke.left);
+        self.prepend(pos, Element::Shape(shape));
     }
 }
 

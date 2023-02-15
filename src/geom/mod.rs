@@ -80,6 +80,8 @@ pub struct Shape {
     /// The shape's background fill.
     pub fill: Option<Paint>,
     /// The shape's border stroke.
+    ///
+    /// Should be drawn as a center stroke.
     pub stroke: Option<Stroke>,
 }
 

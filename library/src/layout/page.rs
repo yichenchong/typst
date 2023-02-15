@@ -287,15 +287,11 @@ impl PageNode {
         // Realize margins.
         child = child.padded(padding);
 
-        // Realize background fill.
-        if let Some(fill) = styles.get(Self::FILL) {
-            child = child.filled(fill);
-        }
-
         // Layout the child.
         let regions = Regions::repeat(size, size.map(Abs::is_finite));
         let mut fragment = child.layout(vt, styles, regions)?;
 
+        let fill = styles.get(Self::FILL);
         let header = styles.get(Self::HEADER);
         let footer = styles.get(Self::FOOTER);
         let foreground = styles.get(Self::FOREGROUND);
@@ -303,6 +299,11 @@ impl PageNode {
 
         // Realize overlays.
         for frame in &mut fragment {
+            // Realize background.
+            if let Some(fill) = fill {
+                frame.fill(fill);
+            }
+
             let size = frame.size();
             let pad = padding.resolve(styles).relative_to(size);
             let pw = size.x - pad.left - pad.right;

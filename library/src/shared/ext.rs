@@ -24,12 +24,6 @@ pub trait ContentExt {
 
     /// Transform this content's contents without affecting layout.
     fn moved(self, delta: Axes<Rel<Length>>) -> Self;
-
-    /// Fill the frames resulting from a content.
-    fn filled(self, fill: Paint) -> Self;
-
-    /// Stroke the frames resulting from a content.
-    fn stroked(self, stroke: Stroke) -> Self;
 }
 
 impl ContentExt for Content {
@@ -60,14 +54,6 @@ impl ContentExt for Content {
     fn moved(self, delta: Axes<Rel<Length>>) -> Self {
         crate::layout::MoveNode { delta, body: self }.pack()
     }
-
-    fn filled(self, fill: Paint) -> Self {
-        FillNode { fill, child: self }.pack()
-    }
-
-    fn stroked(self, stroke: Stroke) -> Self {
-        StrokeNode { stroke, child: self }.pack()
-    }
 }
 
 /// Additional methods for style maps.
@@ -87,63 +73,5 @@ impl StyleMapExt for StyleMap {
                     .collect(),
             ),
         );
-    }
-}
-
-/// Fill the frames resulting from content.
-#[capable(Layout)]
-#[derive(Debug, Hash)]
-struct FillNode {
-    /// How to fill the frames resulting from the `child`.
-    fill: Paint,
-    /// The content whose frames should be filled.
-    child: Content,
-}
-
-#[node]
-impl FillNode {}
-
-impl Layout for FillNode {
-    fn layout(
-        &self,
-        vt: &mut Vt,
-        styles: StyleChain,
-        regions: Regions,
-    ) -> SourceResult<Fragment> {
-        let mut fragment = self.child.layout(vt, styles, regions)?;
-        for frame in &mut fragment {
-            let shape = Geometry::Rect(frame.size()).filled(self.fill);
-            frame.prepend(Point::zero(), Element::Shape(shape));
-        }
-        Ok(fragment)
-    }
-}
-
-/// Stroke the frames resulting from content.
-#[capable(Layout)]
-#[derive(Debug, Hash)]
-struct StrokeNode {
-    /// How to stroke the frames resulting from the `child`.
-    stroke: Stroke,
-    /// The content whose frames should be stroked.
-    child: Content,
-}
-
-#[node]
-impl StrokeNode {}
-
-impl Layout for StrokeNode {
-    fn layout(
-        &self,
-        vt: &mut Vt,
-        styles: StyleChain,
-        regions: Regions,
-    ) -> SourceResult<Fragment> {
-        let mut fragment = self.child.layout(vt, styles, regions)?;
-        for frame in &mut fragment {
-            let shape = Geometry::Rect(frame.size()).stroked(self.stroke);
-            frame.prepend(Point::zero(), Element::Shape(shape));
-        }
-        Ok(fragment)
     }
 }

@@ -81,7 +81,7 @@ impl BoxNode {
 
     /// How much to pad the box's content. See the [rectangle's
     /// documentation]($func/rect.inset) for more details.
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Rel::zero());
 
     /// How much to expand the box's size without affecting the layout.
@@ -131,11 +131,21 @@ impl Layout for BoxNode {
             .map(|(s, b)| s.map(|v| v.relative_to(b)))
             .unwrap_or(regions.base());
 
+        // Prepare fill and stroke.
+        let fill = styles.get(Self::FILL);
+        let stroke = styles
+            .get(Self::STROKE)
+            .map(|s| s.map(PartialStroke::unwrap_or_default));
+
         // Apply inset.
         let mut child = self.body.clone();
-        let inset = styles.get(Self::INSET);
+        let inset = styles
+            .get(Self::INSET)
+            .zip(stroke.map(|s| s.map_or(Abs::zero(), |s| s.thickness)))
+            .map(|(s, t)| s + Rel::from(t));
+
         if inset.iter().any(|v| !v.is_zero()) {
-            child = child.clone().padded(inset.map(|side| side.map(Length::from)));
+            child = child.clone().padded(inset);
         }
 
         // Select the appropriate base and expansion for the child depending
@@ -149,17 +159,11 @@ impl Layout for BoxNode {
             frame.set_baseline(frame.baseline() - shift);
         }
 
-        // Prepare fill and stroke.
-        let fill = styles.get(Self::FILL);
-        let stroke = styles
-            .get(Self::STROKE)
-            .map(|s| s.map(PartialStroke::unwrap_or_default));
-
         // Add fill and/or stroke.
         if fill.is_some() || stroke.iter().any(Option::is_some) {
             let outset = styles.get(Self::OUTSET);
             let radius = styles.get(Self::RADIUS);
-            frame.fill_and_stroke(fill, stroke, outset, radius);
+            frame.rect_background(fill, stroke, outset, radius);
         }
 
         // Apply metadata.
@@ -304,7 +308,7 @@ impl BlockNode {
 
     /// How much to pad the block's content. See the [rectangle's
     /// documentation]($func/rect.inset) for more details.
-    #[property(resolve, fold)]
+    #[property(fold)]
     pub const INSET: Sides<Option<Rel<Length>>> = Sides::splat(Rel::zero());
 
     /// How much to expand the block's size without affecting the layout. See
@@ -353,13 +357,6 @@ impl Layout for BlockNode {
         styles: StyleChain,
         regions: Regions,
     ) -> SourceResult<Fragment> {
-        // Apply inset.
-        let mut child = self.body.clone();
-        let inset = styles.get(Self::INSET);
-        if inset.iter().any(|v| !v.is_zero()) {
-            child = child.clone().padded(inset.map(|side| side.map(Length::from)));
-        }
-
         // Resolve the sizing to a concrete size.
         let sizing = Axes::new(self.width, self.height);
         let mut expand = sizing.as_ref().map(Smart::is_custom);
@@ -368,6 +365,23 @@ impl Layout for BlockNode {
             .zip(regions.base())
             .map(|(s, b)| s.map(|v| v.relative_to(b)))
             .unwrap_or(regions.base());
+
+        // Prepare fill and stroke.
+        let fill = styles.get(Self::FILL);
+        let stroke = styles
+            .get(Self::STROKE)
+            .map(|s| s.map(PartialStroke::unwrap_or_default));
+
+        // Apply inset.
+        let mut child = self.body.clone();
+        let inset = styles
+            .get(Self::INSET)
+            .zip(stroke.map(|s| s.map_or(Abs::zero(), |s| s.thickness)))
+            .map(|(s, t)| s + Rel::from(t));
+
+        if inset.iter().any(|v| !v.is_zero()) {
+            child = child.clone().padded(inset);
+        }
 
         // Layout the child.
         let mut frames = if styles.get(Self::BREAKABLE) {
@@ -407,12 +421,6 @@ impl Layout for BlockNode {
             child.layout(vt, styles, pod)?.into_frames()
         };
 
-        // Prepare fill and stroke.
-        let fill = styles.get(Self::FILL);
-        let stroke = styles
-            .get(Self::STROKE)
-            .map(|s| s.map(PartialStroke::unwrap_or_default));
-
         // Add fill and/or stroke.
         if fill.is_some() || stroke.iter().any(Option::is_some) {
             let mut skip = false;
@@ -423,7 +431,7 @@ impl Layout for BlockNode {
             let outset = styles.get(Self::OUTSET);
             let radius = styles.get(Self::RADIUS);
             for frame in frames.iter_mut().skip(skip as usize) {
-                frame.fill_and_stroke(fill, stroke, outset, radius);
+                frame.rect_background(fill, stroke, outset, radius);
             }
         }
 
