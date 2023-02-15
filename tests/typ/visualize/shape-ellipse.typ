@@ -9,11 +9,12 @@
 #set ellipse(inset: 0pt)
 
 Rect in ellipse in fixed rect.
-#rect(width: 3cm, height: 2cm, fill: rgb("2a631a"),
-  ellipse(fill: forest, width: 100%, height: 100%,
-    rect(fill: conifer, width: 100%, height: 100%,
+#rect(fill: rgb("2a631a"),
+  ellipse(fill: forest, stroke: 4pt + teal,
+    rect(fill: conifer, inset: 4pt,
       align(center + horizon)[
-        Stuff inside an ellipse!
+        Stuff in \
+        the ellipse!
       ]
     )
   )

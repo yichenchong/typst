@@ -28,8 +28,8 @@ Treeworld, the World of worlds, is a world.
 ---
 // This is a fun one.
 #set par(justify: true)
-#show regex("\S"): letter => box(stroke: 1pt, inset: 2pt, upper(letter))
-#lorem(5)
+#show regex("\S+"): it => box(stroke: 1pt, inset: 2pt, upper(it))
+#lorem(6)
 
 ---
 // See also: https://github.com/mTvare6/hello-world.rs

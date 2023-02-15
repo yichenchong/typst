@@ -45,6 +45,6 @@
 #set text("Roboto")
 #square(
   stroke: (left: red, top: yellow, right: green, bottom: blue),
-  radius: 100%, align(center+horizon)[*G*],
-  inset: 8pt
+  radius: 100%, align(center + horizon)[*G*],
+  inset: 8pt,
 )

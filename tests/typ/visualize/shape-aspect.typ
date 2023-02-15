@@ -12,7 +12,7 @@
   square(width: 50%, centered[A]),
   square(height: 50%),
   stack(
-    square(size: 10pt),
+    square(size: 10pt), 2pt,
     square(size: 20pt, centered[B])
   ),
 )
